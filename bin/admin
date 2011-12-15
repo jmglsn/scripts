@@ -1,0 +1,707 @@
+#!/bin/bash
+# copyright d1rk.com
+
+# Please adjust your settings below:
+# Make sure, the folders/users exist, in order to use them!
+
+# User, that is used for deployment-access, own web-data files
+web_user="deploy"
+
+# Group, that above user belongs to
+web_group="www-data"
+
+# Folder, that is used for multi purpose backups
+# This folder MUST be backed up externally, 'nuff said!
+backup_folder="~/backup"
+
+# Folder, that is used for vhosts
+vhosts_folder="/var/vhosts"
+
+# Folder, that is automatically created, to hold temporary files
+# used by this script. Should live below /tmp
+temp="/tmp/script-run"
+
+# Use .mytop file for mysql user/pass-data
+# IGNORES configured values below
+mysql_mytop=true
+
+# Mysql root user
+mysql_user="root"
+
+# Mysql root user password
+mysql_pw=""
+
+# Mysql hostname
+mysql_host="localhost"
+
+### DO NOT EDIT BELOW THIS LINE
+###
+### Or, make sure, you know what you are doing.
+###
+
+# Version number of script
+version="v3.0.0"
+
+# This script has 3 main-entry points:
+# 
+# - vhost
+# - mysql
+# - ssh
+
+
+##
+#   VHOST
+##
+
+# vhost main method
+function vhost(){
+	local action="$1"
+	local host="$2"
+	case $action in
+		"add") vhost_add $host $3 $4;;
+		"rm") vhost_rm $host $3 $4;;
+		"ssl") vhost_ssl $host $3 $4;;
+		"backup") vhost_backup $host $3 $4;;
+	 	*) vhost_usage;;
+	esac
+	exit -1
+}
+
+# prints vhost usage
+function vhost_usage(){
+	header "VHOST Usage"
+	echo "  allows following actions:"
+	echo "  $0 vhost add <hostname> - adds a host <hostname>"
+	echo "  $0 vhost rm <hostname> - removes a host <hostname>"
+	echo "  $0 vhost ssl <hostname> - enables SSL configuration on vhost"
+	echo "  $0 vhost backup <hostname> - backups vhost-configuration"
+	header "Current vhosts at $vhosts_folder"
+	ls -1 $vhosts_folder
+	exit -1
+}
+
+# adds a vhost, asks, if nothing is given
+#   $1 - hostname, i.e. example.com
+#   $2 - application name (optional), uses $1 if omitted
+function vhost_add(){
+	[ $1 ] && host=$1 || read -p "Enter hostname: " host
+	[ $2 ] && app_name=$2 || app_name=$host
+
+	header "CREATING $host as $app_name"
+
+	# create temp-folder
+	mkdir -p $temp
+
+	# setup vhost-folder
+	run "Create /var/vhosts/$app_name/webroot"
+		"sudo mkdir -p /var/vhosts/$app_name/webroot"
+	run "Change permissions of /var/vhosts/$app_name"
+		"sudo chmod -R g+s,u+s /var/vhosts/$app_name"
+	run "Create /var/vhosts/$app_name/log"
+		"sudo mkdir -p /var/vhosts/$app_name/log"
+	run "Change permissions of /var/vhosts/$app_name/log"
+		"sudo chmod -R 0777 /var/vhosts/$app_name/log"
+
+	# prepare vhost
+	snippet="vhost"
+	gist_get $gist $snippet
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name"
+
+	# setup vhost
+	run "Create vhost at /etc/apache2/sites-available/$app_name"
+		"sudo mv $temp/$app_name /etc/apache2/sites-available/$app_name"
+	run "Create /etc/apache2/sites-available/$app_name.conf.d"
+		"sudo mkdir -p /etc/apache2/sites-available/$app_name.conf.d"
+	run "Change owner of /etc/apache2/sites-available/$app_name.conf.d"
+		"sudo chown -R $web_user:$web_group /var/vhosts/$app_name /etc/apache2/sites-available/$app_name.conf.d"
+	run "Enable vhost in /etc/apache2/sites-enabled/$app_name"
+		"sudo ln -s /etc/apache2/sites-available/$app_name /etc/apache2/sites-enabled/$app_name"
+
+	# prepare rewrite-rules
+	snippet="rewrite"
+	gist_get $gist $snippet
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.rewrite"
+	run "Create rewrite-file at /etc/apache2/sites-available/$app_name.conf.d/rewrite"
+		"sudo mv $temp/$app_name.rewrite /etc/apache2/sites-available/$app_name.conf.d/rewrite"
+	run "Create empty file at /etc/apache2/sites-available/$app_name.conf.d/local"
+		"sudo touch /etc/apache2/sites-available/$app_name.conf.d/local"
+	run "Restarting apache2"
+		"sudo /etc/init.d/apache2 restart"
+
+	# remove temp-folder
+	rm -rf $temp
+
+	header "[ ${green}DONE${default} ]"
+	printf "\tNext Steps:\n\tCreate a database for $app_name -> $0 mysql add $app_name dev\n\n"
+	exit 0
+}
+
+# adds SSL to host (creates, if necessary)
+#   $1 - hostname, i.e. example.com
+#   $2 - application name (optional), uses $1 if omitted
+function vhost_ssl(){
+	[ $1 ] && host=$1 || read -p "Enter hostname: " host
+	[ $2 ] && app_name=$2 || app_name=$host
+
+	header "ENABLING SSL for $host as $app_name"
+
+	# create temp-folder
+	mkdir -p $temp
+
+	if ![ -h "/etc/apache2/sites-available/$app_name" ]
+	then
+		vhost_add $host $app_name
+	fi
+
+	# prepare folder for ssl-files
+	run "Create folder /etc/apache2/ssl" "sudo mkdir -p /etc/apache2/ssl"
+
+	# prepare ssl-vhost
+	snippet="ssl"
+	gist_get $gist $snippet
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.ssl"
+	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name" "cat $app_name.ssl | sudo tee -a /etc/apache2/sites-available/$app_name"
+	run "Restarting apache2" "sudo /etc/init.d/apache2 restart"
+
+	# remove temp-folder
+	rm -rf $temp
+
+	header "[ ${green}DONE${default} ]"
+}
+
+# removes a vhost
+#   $1 - app_name, i.e. example or example.com
+function vhost_rm(){
+	[ $1 ] && app_name=$1 || read -p "Enter app_name: " app_name
+
+	header "${red}REMOVING${default} $app_name"
+
+	# TODO: check, if active
+	run "Deactivate /etc/apache2/sites-enabled/$app_name"
+		"sudo rm -rf /etc/apache2/sites-enabled/$app_name"
+
+	# Remove configuration
+	run "Remove /etc/apache2/sites-available/$app_name"
+		"sudo rm /etc/apache2/sites-available/$app_name"
+	run "Remove /etc/apache2/sites-available/$app_name.conf.d/"
+		"sudo rm -rf /etc/apache2/sites-available/$app_name.conf.d"
+	run "Restarting apache2"
+		"sudo service apache2 restart"
+
+	# Remove vhost folder?
+	#run "Remove /var/vhosts/$app_name" "sudo rm -rf /var/vhosts/$app_name"
+
+	header "[ ${green}DONE${default} ]"
+
+	printf "\tNext Steps:\n\tRemove database for $app_name -> $0 mysql rm $app_name (dev)\n"
+	printf "\tRemove vhost-folder -> sudo rm -rf /var/vhosts/$app_name\n\n"
+	exit 0
+}
+
+# backups vhost-config
+#   $1 - app_name, i.e. example or example.com
+#   TODO: IMPLEMENT
+function vhost_backup(){
+	[ $1 ] && app_name=$1 || read -p "Enter app_name: " app_name
+
+	header "${red}BACKUP${default} $app_name"
+
+	echo 'NOT IMPLEMENTED, YET!'
+}
+
+##
+#   MYSQL
+##
+
+
+# mysql main method
+function mysql(){
+	local action="$1"
+	local db_name=$(safe_name $2)
+
+	case $action in
+		"add") mysql_add $db_name $3 $4;;
+		"rm") mysql_rm $db_name $3 $4;;
+		"backup") mysql_backup $db_name $3 $4;;
+		"status") mysql_status;;
+	 	*) mysql_usage;;
+	esac
+	exit -1
+}
+
+# prints mysql usage
+function mysql_usage(){
+	header "MYSQL Usage"
+	echo "  allows following actions:"
+	echo "  $0 mysql add <db_name> <password> - adds a database and a user '<db_name>'"
+	echo "  $0 mysql rm <db_name> - removes a database <db_name>"
+	echo "  $0 mysql backup <db_name> - backups a database <db_name>"
+	echo "  $0 mysql import <filename> <db_name> - imports <filename> from backups into database <db_name>"
+	echo "  $0 mysql status - prints current status of mysql"
+	echo
+	exit -1
+}
+
+# Retrieves current configuration for mysql-server
+function mysql_config(){
+
+	# one could also look into ~/.my.cnf
+	if [ -e ~/.mytop ] && [ $mysql_mytop ]
+	then
+		mysql_user=`cat ~/.mytop | fgrep "user=" | sed 's/user=//'`
+		mysql_pw=`cat ~/.mytop | fgrep "pass=" | sed 's/pass=//'`
+		mysql_host=`cat ~/.mytop | fgrep "host=" | sed 's/host=//'`
+		return
+	fi
+
+	## auto-find environment variables
+	if [ -e /etc/mysql/debian.cnf ] && [ -z $mysql_user ] && [ -z $mysql_pw ]
+	then
+		# on debian-based systems, we can auto-investigate the mysql-root user data
+		mysql_user=$(sudo awk '/user/{print $3}' /etc/mysql/debian.cnf | tail -1)
+		mysql_pw=$(sudo awk '/password/{print $3}' /etc/mysql/debian.cnf | tail -1)
+	fi
+
+}
+
+# Creates a database and an identical named user within mysql
+#   $1 - db_name, name of the database/user to create
+#   $2 - password, to be set for new user (if omitted, will be generated)
+function mysql_add(){
+	[ $1 ] && db_name=$1 || read -p "Enter db_name: " db_name
+	[ $2 ] && local new_password=$2 || local new_password=$(my_pwgen)
+
+	header "ADDING mysql db/user $db_name"
+
+	printf "\t${red}New password is: $new_password${default}\n"
+	#	echo "create new mysql user: $dbUser with password: $dbUserPw      **SAVE THE PASSWORD FOR YOU!**"
+	#	run "Create mysql-database $db_name" "mysqladmin -f -u $mysql_user --password=$mysql_pw create $db_name"
+	run_sql "Create MYSQL user $db_name" "CREATE USER '$db_name'@'localhost' IDENTIFIED BY '$new_password';GRANT ALL ON $db_name.* TO '$db_name'@'localhost';"
+	run_mysqladmin "Create MYSQL database $db_name" "create $db_name"
+}
+
+# Removes a database and an identical named user within mysql
+#   $1 - db_name, name of the database/user to remove
+function mysql_rm(){
+	[ $1 ] && db_name=$1 || read -p "Enter db_name: " db_name
+
+	header "REMOVING mysql db/user $db_name"
+
+	run_sql "DROP USER $db_name" "DROP USER '$db_name'@'localhost';"
+	run_mysqladmin "Remove MYSQL database $db_name" "drop $db_name"
+}
+
+
+
+# Shows status of mysql
+#   $1 - no params
+function mysql_status(){
+	header "MYSQL STATUS"
+	run_mysqladmin "Show Status" "status"
+}
+
+# backups mysql-databases
+#   $1 - db_name, name of the database to backup
+# TODO: implement
+function mysql_backup(){
+	[ $1 ] && db_name=$1 || read -p "Enter db_name: " db_name
+
+	header "MYSQL BACKUP"
+	echo "NOT IMPLEMENTED, YET!"
+}
+
+# imports mysql-database from backup
+#   $1 - filename, i.e. name of the database-backup to import
+#   $2 - db_name, name of the database
+# TODO: implement
+function mysql_import(){
+	[ $1 ] && filename=$1 || read -p "Enter filename: " filename
+	[ $2 ] && db_name=$1 || read -p "Enter db_name: " db_name
+
+	header "MYSQL IMPORT"
+
+	#mysql -u username -p database_name < textfilewithsqlstatments.sql
+
+	echo "NOT IMPLEMENTED, YET!"
+}
+
+
+
+
+
+
+
+##
+#   SSH
+##
+
+# ssh main method
+function ssh(){
+	local action="$1"
+	case $action in
+		"add") ssh_add $2 $3 $4;;
+		"rm") ssh_rm $2 $3 $4;;
+		"backup") ssh_backup $2 $3 $4;;
+	 	*) ssh_usage;;
+	esac
+	exit -1
+}
+
+# prints ssh usage
+function ssh_usage(){
+	header "SSH Usage"
+	echo "  allows following actions:"
+	echo "  $0 ssh add <rsa-key> - adds rsa-key to $web_user's .ssh/authorized_keys"
+	echo "  $0 ssh rm <rsa-key> - removes rsa-key from $web_user's .ssh/authorized_keys"
+	echo "  $0 ssh backup - backups $web_user's .ssh/authorized_keys"
+	exit -1
+}
+
+# TODO: implement
+function ssh_add(){
+	header "ADDING rsa-key"
+	echo "NOT IMPLEMENTED, YET"
+}
+
+# TODO: implement
+function ssh_rm(){
+	header "REMOVING rsa-key"
+	echo "NOT IMPLEMENTED, YET"
+}
+
+# TODO: implement
+function ssh_backup(){
+	header "BACKUP $web_user's .ssh/authorized_keys"
+	echo "NOT IMPLEMENTED, YET"
+}
+
+
+
+
+# Displays version information
+# TODO: refactor
+function version(){
+	echo "$0 version: $version - using gist #$gist"
+}
+
+# Displays basic usage information
+# TODO: Refactor
+function usage(){
+
+	header "VERSION"
+	printf "\t$0 $version - using gist #$gist\n"
+	printf "\n\tsee https://gist.github.com/$gist for snippets\n"
+
+	header "USAGE"
+	echo "   $0 <subject> <verb> <application-name>"
+	echo "           <create-mysql-db | remove-mysql-db> <application-name-without-pre-suff-ix> <dev | test | prod>"  
+	echo "           <create-mysql-user | remove-mysql-user> <username-slug>"  
+	echo "           --help shows this screen"  
+	echo "           --version shows the version number"  
+
+	header "EXAMPLES"
+	echo "       $0 vhost add example.com"
+	echo "       $0 vhost add example.com example"
+	echo "       $0 vhost add dev.example.com"
+	echo "       $0 vhost add dev.example.com dev.example"
+	echo "       $0 vhost rm example.com"
+	echo "       $0 vhost rm example"
+	echo
+	echo "       $0 vhost ssl example.com (auto-creates example.com, if necessary)"
+	echo  
+	echo "       $0 mysql add example prod"
+	echo "       $0 mysql add example dev"
+	echo "       $0 mysql rm example"
+	echo "       $0 mysql rm example dev"
+	echo  
+	exit -1
+}
+
+# Shows in-depth help of $0
+# TODO: implement
+function help(){
+	header "HELP"
+	echo " NOT IMPLEMENTED, YET"
+}
+
+# Runs a few internal tests and checks, if everything works correctly
+function testrun(){
+	header "TESTRUN"
+	run "Running ls -al" "ls -al"
+	run_sql "Run MYSQL query" "SHOW DATABASES;"
+	run_mysqladmin "Run MYSQLADMIN script" "status"
+}
+
+# Retrieves $snippet via gist.github.com
+#   $1 - number of snippet, defaults to 1400460 (pass in via -g)
+#   $2 - name of snippet to fetch, i.e. vhost
+function gist_get(){
+	wget -q --no-check-certificate -P "$temp" https://raw.github.com/gist/$1/$2
+}
+
+# Generates nice password
+#   automatically installs pwgen via apt-get, if necessary
+function my_pwgen(){
+	pwgen=$(type -p pwgen)
+	os=$(uname) # TODO: do something useful with it ;)
+	if [ -z "$pwgen" ]
+	then
+		sudo apt-get -qq install pwgen
+	fi
+	pw=$(pwgen 16 | awk '{print $1}' | tail -1)
+	#pw=`md5 -qs"$@"`
+	echo $pw
+}
+
+# Returns a filesave name of given argument
+#   $1 - string to be made filename-ready
+function safe_name(){
+	echo ${1/\./_}
+}
+
+# prints a nice header
+#   $1 - text to be displayed
+#   $2 - color (optional), defaults to $white
+function header(){
+	header=$1
+	[ $2 ] && local color="$2" || local color="$white"
+	printf "\n$white -- $color$header$default ---------------$default\n\n"
+}
+
+# prints out the current configuration
+#   takes care of $boring, $dryrun, $verbose and $interactive
+function print_config(){
+	header "RUNTIME CONFIGURATION"
+	[ $boring ] || local boring="false"
+	[ $dryrun ] || local dryrun="false"
+	[ $verbose ] || local verbose="false"
+	printf "\tgist:\t\t$white$gist$default\n"
+	printf "\tboring:\t\t$white$boring$default\n"
+	printf "\tdryrun:\t\t$white$dryrun$default\n"
+	printf "\tverbose:\t$white$verbose$default\n"
+	printf "\tinteractive:\t$white$interactive$default\n"
+	header "VHOST CONFIGURATION"
+	printf "\tweb user:\t$white$web_user$default\n"
+	printf "\tweb group:\t$white$web_group$default\n"
+	header "MYSQL CONFIGURATION"
+	printf "\tmysql user:\t$white$mysql_user$default\n"
+	printf "\tmysql pass:\t$white$mysql_pw$default\n"
+}
+
+# prints out the dryrun header
+function print_dryrun(){
+	header "DRYRUN" $red
+	printf "\t${red}Attention: Dryrun means, nothing is actually executed$default\n\n"
+}
+
+# inits colors, regardless of color-capability
+#   $1 (optional), pass true, to supress colors at all
+function init_colors(){
+	#Black       0;30     Dark Gray     1;30
+	#Blue        0;34     Light Blue    1;34
+	#Green       0;32     Light Green   1;32
+	#Cyan        0;36     Light Cyan    1;36
+	#Red         0;31     Light Red     1;31
+	#Purple      0;35     Light Purple  1;35
+	#Brown       0;33     Yellow        1;33
+	#Light Gray  0;37     White         1;37
+	[ $1 ] && local no_colors=true || local no_colors=false
+
+	# initializes all colornames, so one can use it, regardless of setting
+	if $no_colors; then
+		blue="" green="" cyan="" red="" purple="" gray="" yellow="" white="" default=""
+	else
+		blue="\e[0;34m" green="\e[0;32m" cyan="\e[0;36m" red="\e[0;31m" purple="\e[0;35m" gray="\e[0;37m" yellow="\e[1;33m" white="\e[1;37m" default="\e[m"
+	fi
+
+}
+
+# Displays output of $cmd (or not, depending on $verbose)
+#   $cmd must be set in advance!
+function output(){
+	if [ $verbose ]
+	then
+		printf "\t$cmd\n"
+		command $cmd
+	else
+		out=`$cmd`
+	fi
+	if [ "$?" -ne "0" ]; then
+		printf "[ ${red}FAIL${default} ]\n\n"
+	else
+	 	printf "[ ${green}OK${default} ]\n\n"
+	fi
+}
+
+# runs a command, depending on $interactive, it may ask
+#   $1 - message to be displayed (if -v)
+#   $2 - command to be executed
+#   $3 - boolean (optional) newline on message, if
+# TODO: if only $1 is set, do it, without asking
+function run_ask(){
+	message="$1"
+	cmd="$2"
+	[ $3 ] && local newline="" || local newline="\n"
+
+	[ $dryrun ] && printf "\t${white}$message${default}\n\t$cmd\n[ ${yellow}SKIPPED${default} ]\n\n" && return
+
+	if [ $interactive ]
+	then
+		printf "\t${white}$message${default} "
+		read -s -n1 -p " [ y/N ] " answer
+		printf "\n"
+		[[ $answer = [qQ] ]] && exit -1
+		[[ $answer = [yY] ]] && output || printf "[ ${yellow}SKIPPED${default} ]\n\n"
+	else
+		printf "\t${white}$message${default}\n"
+		output
+	fi
+}
+
+# runs a command, depending on $interactive, it may ask
+#   $1 - message to be displayed (if -v)
+#   $2 - command to be executed
+#   $3 - boolean (optional) newline on message, if
+# TODO: if only $1 is set, do it, without asking
+function run(){
+	message="$1"
+	cmd="$2"
+	[ $3 ] && local newline="" || local newline="\n"
+
+	run_ask "$message" "$cmd" $newline
+}
+
+# Run SQL as mysql-root user
+#   $1 - message to be displayed (if -v)
+#   $2 - SQL to be run
+#   $3 - password of root (optional)
+# TODO: fix on OSX (mysql is empty, there)
+function run_sql(){
+	message="$1"
+	sql="$2"
+	[ $3 ] && local mysql_pw=$3 || local mysql_pw=$mysql_pw
+
+	mysql=`which mysql`
+	cmd="$mysql --user=$mysql_user --password=$mysql_pw -e \"$sql\""
+	run_ask "$message" "$cmd" $newline
+}
+
+# Run command via mysqladmin
+#   $1 - message to be displayed (if -v)
+#   $2 - command to be run
+#   $3 - password of root (optional)
+function run_mysqladmin(){
+	message="$1"
+	cmd=$2
+	[ $3 ] && local mysql_pw=$3 || local mysql_pw=$mysql_pw
+
+	# build command-statement
+	mysqladmin=`which mysqladmin`
+	cmd="$mysqladmin -f -u $mysql_user --password=$mysql_pw $cmd"
+	run_ask "$message" "$cmd" $newline
+}
+
+# parse options
+set -- `getopt "bcdhivyg:" "$@"` || usage
+
+# initialize options
+#   boring - color off, if true
+#   config - shows config, if true
+#   dryrun - commands are just displayed, if true
+#   verbose - more communicative, if true
+#   show_help - shows help, if set
+#   interactive - asks before every change
+#   yes - never (!) asks before every change
+#   gist - allows to overwrite gist number, if given
+#   
+boring= config= dryrun= show_help= interactive= verbose= show_help= gist=1400460
+while :
+do
+	case "$1" in
+	-b) boring=true;;
+	-c) config=true;;
+	-d) dryrun=true;;
+	-h) show_help=true;;
+	-i) interactive=true;;
+	-y) interactive=false;;
+	-v) verbose=true;;
+	-g) shift; gist="$1";;
+	--) break;;
+	esac
+	shift
+done
+shift # get rid of --
+
+## print configuration first, if requested
+init_colors $boring
+mysql_config
+[ $config ] && print_config
+[ $dryrun ] && print_dryrun
+[ $show_help ] && usage #scripts ends here
+
+case $1 in
+	"vhost") shift; vhost $1 $2 $3 $4;;
+	"mysql") shift; mysql $1 $2 $3 $4;;
+	"ssh") shift; ssh $1 $2 $3 $4;;
+	"version") version;;
+	"test") testrun;;
+	"help") help;;
+ 	*) usage;;
+esac
+
+
+
+
+
+
+
+# 
+# if ( test -z "$1" ) || ( test -z "$2" )
+# 	then
+# 		if test "--version" = "$1" 
+# 			then 
+# 				version
+# 			else
+# 				usage
+# 		fi
+# 	exit -1
+# fi
+# 
+# case $1 in
+# 	"--version")version;;
+# 	"create")create $2;;
+# 	"ssl")create_ssl $2;;
+# 	"remove")remove $2;;
+# 	"create-mysql-db")
+# 		if ( test -z "$3" )
+# 			then usage
+# 			else 
+# 				create_mysql_db $2 $3
+# 				create_mysql_app_user $2 $3
+# 		fi
+# 		;;
+# 	"remove-mysql-db")
+# 		if ( test -z "$3" )
+# 			then usage
+# 			else 
+# 				remove_mysql_db $2 $3
+# 				remove_mysql_app_user $2 $3
+# 		fi
+# 		;;
+# 	"create-mysql-user")
+# 		if ( test -z "$2" )
+# 			then usage
+# 			else 
+# 				create_mysql_app_user "gen" $2
+# 		fi
+# 		;;
+# 	"remove-mysql-user")
+# 		if ( test -z "$2" )
+# 			then usage
+# 			else 
+# 				remove_mysql_app_user "gen" $2
+# 		fi
+# 		;;
+# 	"--help")usage;;
+# 	*)usage;;
+# esac
