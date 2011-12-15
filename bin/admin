@@ -160,8 +160,10 @@ function vhost_ssl(){
 	snippet="ssl"
 	gist_get $gist $snippet
 	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.ssl"
-	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name" "cat $app_name.ssl | sudo tee -a /etc/apache2/sites-available/$app_name"
-	run "Restarting apache2" "sudo /etc/init.d/apache2 restart"
+	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name"
+		"cat $app_name.ssl | sudo tee -a /etc/apache2/sites-available/$app_name"
+	run "Restarting apache2"
+		"sudo /etc/init.d/apache2 restart"
 
 	# remove temp-folder
 	rm -rf $temp
@@ -242,7 +244,7 @@ function mysql_usage(){
 	exit -1
 }
 
-# Retrieves current configuration for mysql-server
+# Retrieves configuration, to access mysql-server
 function mysql_config(){
 
 	# one could also look into ~/.my.cnf
@@ -276,8 +278,10 @@ function mysql_add(){
 	printf "\t${red}New password is: $new_password${default}\n"
 	#	echo "create new mysql user: $dbUser with password: $dbUserPw      **SAVE THE PASSWORD FOR YOU!**"
 	#	run "Create mysql-database $db_name" "mysqladmin -f -u $mysql_user --password=$mysql_pw create $db_name"
-	run_sql "Create MYSQL user $db_name" "CREATE USER '$db_name'@'localhost' IDENTIFIED BY '$new_password';GRANT ALL ON $db_name.* TO '$db_name'@'localhost';"
-	run_mysqladmin "Create MYSQL database $db_name" "create $db_name"
+	run_sql "Create MYSQL user $db_name"
+			"CREATE USER '$db_name'@'localhost' IDENTIFIED BY '$new_password';GRANT ALL ON $db_name.* TO '$db_name'@'localhost';"
+	run_mysqladmin "Create MYSQL database $db_name"
+			"create $db_name"
 }
 
 # Removes a database and an identical named user within mysql
@@ -287,8 +291,10 @@ function mysql_rm(){
 
 	header "REMOVING mysql db/user $db_name"
 
-	run_sql "DROP USER $db_name" "DROP USER '$db_name'@'localhost';"
-	run_mysqladmin "Remove MYSQL database $db_name" "drop $db_name"
+	run_sql "DROP USER $db_name"
+			"DROP USER '$db_name'@'localhost';"
+	run_mysqladmin "Remove MYSQL database $db_name"
+			"drop $db_name"
 }
 
 
@@ -357,16 +363,40 @@ function ssh_usage(){
 	exit -1
 }
 
-# TODO: implement
+# Adds given rsa-key to authorized_keys-file of $web_user
+#   $1 - rsa.pub public key to add, no quotes necessary
 function ssh_add(){
+	[ $1 ] && local key=$1 || read -p "Enter rsa.pub key: " key
+	local filename=/home/$web_user/.ssh/authorized_keys
+
 	header "ADDING rsa-key"
-	echo "NOT IMPLEMENTED, YET"
+
+	if sudo grep -Fxq "$key" $filename
+	then
+		printf "Key already exists in $filename"
+	else
+		run "Adding rsa-key to $filename"
+			"echo '$key' | sudo tee -a $filename"
+	fi
 }
 
-# TODO: implement
+# Removes given rsa-key from authorized_keys-file of $web_user
+#   $1 - rsa.pub public key to add, no quotes necessary
 function ssh_rm(){
+	[ $1 ] && local key=$1 || read -p "Enter rsa.pub key: " key
+ 	local filename=/home/$web_user/.ssh/authorized_keys
+
 	header "REMOVING rsa-key"
-	echo "NOT IMPLEMENTED, YET"
+
+	if sudo grep -Fxq "$key" $filename
+	then
+		run "Adding rsa-key to $filename"
+			"cat $filename"
+			# TODO: remove key from file
+#			"sed s///g $filename > $filename"
+	else
+		printf "Key not found in $filename"
+	fi
 }
 
 # TODO: implement
@@ -385,7 +415,7 @@ function version(){
 }
 
 # Displays basic usage information
-# TODO: Refactor
+# TODO: Refactor (should use usage of various topics, instead)
 function usage(){
 
 	header "VERSION"
@@ -427,9 +457,12 @@ function help(){
 # Runs a few internal tests and checks, if everything works correctly
 function testrun(){
 	header "TESTRUN"
-	run "Running ls -al" "ls -al"
-	run_sql "Run MYSQL query" "SHOW DATABASES;"
-	run_mysqladmin "Run MYSQLADMIN script" "status"
+	run "Running ls -al"
+		"ls -al"
+	run_sql "Run MYSQL query"
+			"SHOW DATABASES;"
+	run_mysqladmin "Run MYSQLADMIN script"
+			"status"
 }
 
 # Retrieves $snippet via gist.github.com
