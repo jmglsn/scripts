@@ -17,6 +17,10 @@ backup_folder="~/backup"
 # Folder, that is used for vhosts
 vhosts_folder="/var/vhosts"
 
+# Default folder, that is webrooted in apache
+# apache htdocs will be at $vhosts_folder/$app_name/$vhosts_webroot
+vhosts_webroot="webroot"
+
 # Folder, that is automatically created, to hold temporary files
 # used by this script. Should live below /tmp
 temp="/tmp/script-run"
@@ -93,19 +97,27 @@ function vhost_add(){
 	mkdir -p $temp
 
 	# setup vhost-folder
-	run "Create /var/vhosts/$app_name/webroot" \
-		"sudo mkdir -p /var/vhosts/$app_name/webroot"
-	run "Change permissions of /var/vhosts/$app_name" \
-		"sudo chmod -R g+s,u+s /var/vhosts/$app_name"
-	run "Create /var/vhosts/$app_name/log" \
-		"sudo mkdir -p /var/vhosts/$app_name/log"
-	run "Change permissions of /var/vhosts/$app_name/log" \
-		"sudo chmod -R 0777 /var/vhosts/$app_name/log"
+	run "Create $vhosts_folder/$app_name/$vhosts_webroot" \
+		"sudo mkdir -p $vhosts_folder/$app_name/$vhosts_webroot"
+	run "Change permissions of $vhosts_folder/$app_name" \
+		"sudo chmod -R g+s,u+s $vhosts_folder/$app_name"
+	run "Create $vhosts_folder/$app_name/log" \
+		"sudo mkdir -p $vhosts_folder/$app_name/log"
+	run "Change permissions of $vhosts_folder/$app_name/log" \
+		"sudo chmod -R 0777 $vhosts_folder/$app_name/log"
+
+	# prepare logrotate-file
+	snippet="logrotate"
+	gist_get $gist $snippet
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.logrotate"
+
+	run "Create log-rotation file at /etc/logrotate.d/$app_name" \
+		"sudo mv $temp/$app_name.logrotate /etc/logrotate.d/$app_name"
 
 	# prepare vhost
 	snippet="vhost"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name"
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name"
 
 	# setup vhost
 	run "Create vhost at /etc/apache2/sites-available/$app_name" \
@@ -113,14 +125,14 @@ function vhost_add(){
 	run "Create /etc/apache2/sites-available/$app_name.conf.d" \
 		"sudo mkdir -p /etc/apache2/sites-available/$app_name.conf.d"
 	run "Change owner of /etc/apache2/sites-available/$app_name.conf.d" \
-		"sudo chown -R $web_user:$web_group /var/vhosts/$app_name /etc/apache2/sites-available/$app_name.conf.d"
+		"sudo chown -R $web_user:$web_group $vhosts_folder/$app_name /etc/apache2/sites-available/$app_name.conf.d"
 	run "Enable vhost in /etc/apache2/sites-enabled/$app_name" \
 		"sudo ln -s /etc/apache2/sites-available/$app_name /etc/apache2/sites-enabled/$app_name"
 
 	# prepare rewrite-rules
 	snippet="rewrite"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.rewrite"
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.rewrite"
 	run "Create rewrite-file at /etc/apache2/sites-available/$app_name.conf.d/rewrite" \
 		"sudo mv $temp/$app_name.rewrite /etc/apache2/sites-available/$app_name.conf.d/rewrite"
 	run "Create empty file at /etc/apache2/sites-available/$app_name.conf.d/local" \
@@ -132,7 +144,7 @@ function vhost_add(){
 	rm -rf $temp
 
 	header "[ ${green}DONE${default} ]"
-	printf "\tNext Steps:\n\tCreate a database for $app_name -> $0 mysql add $app_name dev\n\n"
+	printf "\tNext Steps:\n\tCreate a database for $app_name -> $0 mysql add $app_name\n\n"
 	exit 0
 }
 
@@ -185,24 +197,32 @@ function vhost_rm(){
 	# Remove configuration
 	run "Remove /etc/apache2/sites-available/$app_name" \
 		"sudo rm /etc/apache2/sites-available/$app_name"
+
+	# TODO: check, if folder exists
 	run "Remove /etc/apache2/sites-available/$app_name.conf.d/" \
 		"sudo rm -rf /etc/apache2/sites-available/$app_name.conf.d"
+
+	# TODO: check, if file exists
+	run "Remove log-rotation files from /etc/logrotate.d/$app_name" \
+		"sudo rm -f /etc/logrotate.d/$app_name"
+
 	run "Restarting apache2" \
 		"sudo service apache2 restart"
 
 	# Remove vhost folder?
-	#run "Remove /var/vhosts/$app_name" "sudo rm -rf /var/vhosts/$app_name"
+	# TODO: when in inactive-mode, ask :)
+	#run "Remove $vhosts_folder/$app_name" "sudo rm -rf $vhosts_folder/$app_name"
 
 	header "[ ${green}DONE${default} ]"
 
-	printf "\tNext Steps:\n\tRemove database for $app_name -> $0 mysql rm $app_name (dev)\n"
-	printf "\tRemove vhost-folder -> sudo rm -rf /var/vhosts/$app_name\n\n"
+	printf "\tNext Steps:\n\tRemove database for $app_name -> $0 mysql rm $app_name\n"
+	printf "\tRemove vhost-folder -> sudo rm -rf $vhosts_folder/$app_name\n\n"
 	exit 0
 }
 
 # backups vhost-config
 #   $1 - app_name, i.e. example or example.com
-#   TODO: IMPLEMENT
+#   TODO: IMPLEMENT (DO NOT FORGET LOGS ;)
 function vhost_backup(){
 	[ $1 ] && app_name=$1 || read -p "Enter app_name: " app_name
 
