@@ -171,7 +171,7 @@ function vhost_ssl(){
 	# prepare ssl-vhost
 	snippet="ssl"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.ssl"
+	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.ssl"
 	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name" \
 		"cat $app_name.ssl | sudo tee -a /etc/apache2/sites-available/$app_name"
 	run "Restarting apache2" \
