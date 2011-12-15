@@ -93,13 +93,13 @@ function vhost_add(){
 	mkdir -p $temp
 
 	# setup vhost-folder
-	run "Create /var/vhosts/$app_name/webroot"
+	run "Create /var/vhosts/$app_name/webroot" \
 		"sudo mkdir -p /var/vhosts/$app_name/webroot"
-	run "Change permissions of /var/vhosts/$app_name"
+	run "Change permissions of /var/vhosts/$app_name" \
 		"sudo chmod -R g+s,u+s /var/vhosts/$app_name"
-	run "Create /var/vhosts/$app_name/log"
+	run "Create /var/vhosts/$app_name/log" \
 		"sudo mkdir -p /var/vhosts/$app_name/log"
-	run "Change permissions of /var/vhosts/$app_name/log"
+	run "Change permissions of /var/vhosts/$app_name/log" \
 		"sudo chmod -R 0777 /var/vhosts/$app_name/log"
 
 	# prepare vhost
@@ -108,24 +108,24 @@ function vhost_add(){
 	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name"
 
 	# setup vhost
-	run "Create vhost at /etc/apache2/sites-available/$app_name"
+	run "Create vhost at /etc/apache2/sites-available/$app_name" \
 		"sudo mv $temp/$app_name /etc/apache2/sites-available/$app_name"
-	run "Create /etc/apache2/sites-available/$app_name.conf.d"
+	run "Create /etc/apache2/sites-available/$app_name.conf.d" \
 		"sudo mkdir -p /etc/apache2/sites-available/$app_name.conf.d"
-	run "Change owner of /etc/apache2/sites-available/$app_name.conf.d"
+	run "Change owner of /etc/apache2/sites-available/$app_name.conf.d" \
 		"sudo chown -R $web_user:$web_group /var/vhosts/$app_name /etc/apache2/sites-available/$app_name.conf.d"
-	run "Enable vhost in /etc/apache2/sites-enabled/$app_name"
+	run "Enable vhost in /etc/apache2/sites-enabled/$app_name" \
 		"sudo ln -s /etc/apache2/sites-available/$app_name /etc/apache2/sites-enabled/$app_name"
 
 	# prepare rewrite-rules
 	snippet="rewrite"
 	gist_get $gist $snippet
 	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.rewrite"
-	run "Create rewrite-file at /etc/apache2/sites-available/$app_name.conf.d/rewrite"
+	run "Create rewrite-file at /etc/apache2/sites-available/$app_name.conf.d/rewrite" \
 		"sudo mv $temp/$app_name.rewrite /etc/apache2/sites-available/$app_name.conf.d/rewrite"
-	run "Create empty file at /etc/apache2/sites-available/$app_name.conf.d/local"
+	run "Create empty file at /etc/apache2/sites-available/$app_name.conf.d/local" \
 		"sudo touch /etc/apache2/sites-available/$app_name.conf.d/local"
-	run "Restarting apache2"
+	run "Restarting apache2" \
 		"sudo /etc/init.d/apache2 restart"
 
 	# remove temp-folder
@@ -160,9 +160,9 @@ function vhost_ssl(){
 	snippet="ssl"
 	gist_get $gist $snippet
 	sed s/:servername/$host/g "$temp/$snippet" | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.ssl"
-	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name"
+	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name" \
 		"cat $app_name.ssl | sudo tee -a /etc/apache2/sites-available/$app_name"
-	run "Restarting apache2"
+	run "Restarting apache2" \
 		"sudo /etc/init.d/apache2 restart"
 
 	# remove temp-folder
@@ -179,15 +179,15 @@ function vhost_rm(){
 	header "${red}REMOVING${default} $app_name"
 
 	# TODO: check, if active
-	run "Deactivate /etc/apache2/sites-enabled/$app_name"
+	run "Deactivate /etc/apache2/sites-enabled/$app_name" \
 		"sudo rm -rf /etc/apache2/sites-enabled/$app_name"
 
 	# Remove configuration
-	run "Remove /etc/apache2/sites-available/$app_name"
+	run "Remove /etc/apache2/sites-available/$app_name" \
 		"sudo rm /etc/apache2/sites-available/$app_name"
-	run "Remove /etc/apache2/sites-available/$app_name.conf.d/"
+	run "Remove /etc/apache2/sites-available/$app_name.conf.d/" \
 		"sudo rm -rf /etc/apache2/sites-available/$app_name.conf.d"
-	run "Restarting apache2"
+	run "Restarting apache2" \
 		"sudo service apache2 restart"
 
 	# Remove vhost folder?
@@ -278,9 +278,9 @@ function mysql_add(){
 	printf "\t${red}New password is: $new_password${default}\n"
 	#	echo "create new mysql user: $dbUser with password: $dbUserPw      **SAVE THE PASSWORD FOR YOU!**"
 	#	run "Create mysql-database $db_name" "mysqladmin -f -u $mysql_user --password=$mysql_pw create $db_name"
-	run_sql "Create MYSQL user $db_name"
+	run_sql "Create MYSQL user $db_name" \
 			"CREATE USER '$db_name'@'localhost' IDENTIFIED BY '$new_password';GRANT ALL ON $db_name.* TO '$db_name'@'localhost';"
-	run_mysqladmin "Create MYSQL database $db_name"
+	run_mysqladmin "Create MYSQL database $db_name" \
 			"create $db_name"
 }
 
@@ -291,9 +291,9 @@ function mysql_rm(){
 
 	header "REMOVING mysql db/user $db_name"
 
-	run_sql "DROP USER $db_name"
+	run_sql "DROP USER $db_name" \
 			"DROP USER '$db_name'@'localhost';"
-	run_mysqladmin "Remove MYSQL database $db_name"
+	run_mysqladmin "Remove MYSQL database $db_name" \
 			"drop $db_name"
 }
 
@@ -303,7 +303,8 @@ function mysql_rm(){
 #   $1 - no params
 function mysql_status(){
 	header "MYSQL STATUS"
-	run_mysqladmin "Show Status" "status"
+	run_mysqladmin "Show Status" \
+			"status"
 }
 
 # backups mysql-databases
@@ -375,7 +376,7 @@ function ssh_add(){
 	then
 		printf "Key already exists in $filename"
 	else
-		run "Adding rsa-key to $filename"
+		run "Adding rsa-key to $filename" \
 			"echo '$key' | sudo tee -a $filename"
 	fi
 }
@@ -390,7 +391,7 @@ function ssh_rm(){
 
 	if sudo grep -Fxq "$key" $filename
 	then
-		run "Adding rsa-key to $filename"
+		run "Adding rsa-key to $filename" \
 			"cat $filename"
 			# TODO: remove key from file
 #			"sed s///g $filename > $filename"
@@ -457,11 +458,11 @@ function help(){
 # Runs a few internal tests and checks, if everything works correctly
 function testrun(){
 	header "TESTRUN"
-	run "Running ls -al"
+	run "Running ls -al" \
 		"ls -al"
-	run_sql "Run MYSQL query"
+	run_sql "Run MYSQL query" \
 			"SHOW DATABASES;"
-	run_mysqladmin "Run MYSQLADMIN script"
+	run_mysqladmin "Run MYSQLADMIN script" \
 			"status"
 }
 
@@ -682,59 +683,4 @@ case $1 in
  	*) usage;;
 esac
 
-
-
-
-
-
-
-# 
-# if ( test -z "$1" ) || ( test -z "$2" )
-# 	then
-# 		if test "--version" = "$1" 
-# 			then 
-# 				version
-# 			else
-# 				usage
-# 		fi
-# 	exit -1
-# fi
-# 
-# case $1 in
-# 	"--version")version;;
-# 	"create")create $2;;
-# 	"ssl")create_ssl $2;;
-# 	"remove")remove $2;;
-# 	"create-mysql-db")
-# 		if ( test -z "$3" )
-# 			then usage
-# 			else 
-# 				create_mysql_db $2 $3
-# 				create_mysql_app_user $2 $3
-# 		fi
-# 		;;
-# 	"remove-mysql-db")
-# 		if ( test -z "$3" )
-# 			then usage
-# 			else 
-# 				remove_mysql_db $2 $3
-# 				remove_mysql_app_user $2 $3
-# 		fi
-# 		;;
-# 	"create-mysql-user")
-# 		if ( test -z "$2" )
-# 			then usage
-# 			else 
-# 				create_mysql_app_user "gen" $2
-# 		fi
-# 		;;
-# 	"remove-mysql-user")
-# 		if ( test -z "$2" )
-# 			then usage
-# 			else 
-# 				remove_mysql_app_user "gen" $2
-# 		fi
-# 		;;
-# 	"--help")usage;;
-# 	*)usage;;
-# esac
+# EOF
