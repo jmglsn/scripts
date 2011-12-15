@@ -1,0 +1,55 @@
+#!/usr/bin/python
+
+"""
+file: get-iana.py
+
+Replacement for get-iana.sh that ships with firehol and no longer seems to work.
+This is less code, less confusing, uses the preferred XML format from IANA and works.
+
+Copyright (c) 2010 Sjan Evardsson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+"""
+
+import urllib
+import xml.dom.minidom
+import os
+urllib.urlretrieve('http://www.iana.org/assignments/ipv4-address-space/ipv4-address-space.xml','address-space.xml')
+results = []
+x = xml.dom.minidom.parse('address-space.xml')
+for i in x.childNodes:
+    if i.localName == 'registry':
+        for j in i.childNodes:
+            if j.localName == 'record':
+                for k in j.childNodes:
+                    if k.localName == 'prefix':
+                        prefix = k.firstChild.data
+                    if k.localName == 'status':
+                        status = k.firstChild.data
+                if status == 'RESERVED' or status == 'UNALLOCATED':
+                    results.append(prefix)
+outfile = open('iana-temp','w')
+for r in results:
+    hi = int(r.split('/')[0])
+    outfile.write(str(hi)+'.0.0.0/8\n')
+outfile.close()
+os.remove('address-space.xml')
+os.rename('/etc/firehol/RESERVED_IPS','/etc/firehol/RESERVED_IPS.old')
+os.rename('iana-temp','/etc/firehol/RESERVED_IPS')
+
