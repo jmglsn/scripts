@@ -109,15 +109,19 @@ function vhost_add(){
 	# prepare logrotate-file
 	snippet="logrotate"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.logrotate"
+	sed s%:serveralias%$host%g "$temp/$snippet" | sed s%:webroot%$vhosts_webroot% | sed s%:vhosts%$vhosts_folder% | sed s%:appname%$app_name% > "$temp/$app_name.logrotate"
 
 	run "Create log-rotation file at /etc/logrotate.d/$app_name" \
 		"sudo mv $temp/$app_name.logrotate /etc/logrotate.d/$app_name"
+	run "Change owner of /etc/logrotate.d/$app_name" \
+		"sudo chown root:root /etc/logrotate.d/$app_name"
+	run "Change permissions of /etc/logrotate.d/$app_name" \
+		"sudo chmod -R 0644 /etc/logrotate.d/$app_name"
 
 	# prepare vhost
 	snippet="vhost"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name"
+	sed s%:serveralias%$host%g "$temp/$snippet" | sed s%:webroot%$vhosts_webroot% | sed s%:vhosts%$vhosts_folder% | sed s%:appname%$app_name% > "$temp/$app_name"
 
 	# setup vhost
 	run "Create vhost at /etc/apache2/sites-available/$app_name" \
@@ -132,7 +136,8 @@ function vhost_add(){
 	# prepare rewrite-rules
 	snippet="rewrite"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.rewrite"
+	sed s%:serveralias%$host%g "$temp/$snippet" | sed s%:webroot%$vhosts_webroot% | sed s%:vhosts%$vhosts_folder% | sed s%:appname%$app_name% > "$temp/$app_name.rewrite"
+
 	run "Create rewrite-file at /etc/apache2/sites-available/$app_name.conf.d/rewrite" \
 		"sudo mv $temp/$app_name.rewrite /etc/apache2/sites-available/$app_name.conf.d/rewrite"
 	run "Create empty file at /etc/apache2/sites-available/$app_name.conf.d/local" \
@@ -145,7 +150,6 @@ function vhost_add(){
 
 	header "[ ${green}DONE${default} ]"
 	printf "\tNext Steps:\n\tCreate a database for $app_name -> $0 mysql add $app_name\n\n"
-	exit 0
 }
 
 # adds SSL to host (creates, if necessary)
@@ -157,23 +161,27 @@ function vhost_ssl(){
 
 	header "ENABLING SSL for $host as $app_name"
 
-	# create temp-folder
-	mkdir -p $temp
-
-	if ![ -h "/etc/apache2/sites-available/$app_name" ]
-	then
+	if [ ! -f "/etc/apache2/sites-available/$app_name" ]; then
 		vhost_add $host $app_name
 	fi
 
+	# create temp-folder
+	mkdir -p $temp
+
 	# prepare folder for ssl-files
-	run "Create folder /etc/apache2/ssl" "sudo mkdir -p /etc/apache2/ssl"
+	if [ ! -d  /etc/apache2/ssl ]; then
+		run "Create folder /etc/apache2/ssl" \
+			"sudo mkdir -p /etc/apache2/ssl"
+	fi
 
 	# prepare ssl-vhost
 	snippet="ssl"
 	gist_get $gist $snippet
-	sed s/:servername/$host/g "$temp/$snippet" | sed s/:webroot/$vhosts_webroot/g | sed s/:vhosts/$vhosts_folder/g | sed s/:serveralias/$host/g | sed s/:appname/$app_name/g > "$temp/$app_name.ssl"
+	sed s%:serveralias%$host%g "$temp/$snippet" | sed s%:webroot%$vhosts_webroot% | sed s%:vhosts%$vhosts_folder% | sed s%:appname%$app_name% > "$temp/$app_name.ssl"
+
 	run "Prepend SSL vhost to /etc/apache2/sites-available/$app_name" \
 		"cat $app_name.ssl | sudo tee -a /etc/apache2/sites-available/$app_name"
+
 	run "Restarting apache2" \
 		"sudo /etc/init.d/apache2 restart"
 
@@ -244,6 +252,7 @@ function mysql(){
 	case $action in
 		"add") mysql_add $db_name $3 $4;;
 		"rm") mysql_rm $db_name $3 $4;;
+		"import") mysql_import $db_name $3 $4;;
 		"backup") mysql_backup $db_name $3 $4;;
 		"status") mysql_status;;
 	 	*) mysql_usage;;
@@ -258,7 +267,7 @@ function mysql_usage(){
 	echo "  $0 mysql add <db_name> <password> - adds a database and a user '<db_name>'"
 	echo "  $0 mysql rm <db_name> - removes a database <db_name>"
 	echo "  $0 mysql backup <db_name> - backups a database <db_name>"
-	echo "  $0 mysql import <filename> <db_name> - imports <filename> from backups into database <db_name>"
+	echo "  $0 mysql import <db_name> <filename> - imports <filename> into database <db_name>"
 	echo "  $0 mysql status - prints current status of mysql"
 	echo
 	exit -1
@@ -334,6 +343,7 @@ function mysql_backup(){
 	[ $1 ] && db_name=$1 || read -p "Enter db_name: " db_name
 
 	header "MYSQL BACKUP"
+	#mysqldump --add-drop-table -h $mysql_host -u $mysql_user -p $mysql_pw $db_name | gzip > /home/d1rk/shopyeti.sql.gz
 	echo "NOT IMPLEMENTED, YET!"
 }
 
@@ -342,14 +352,15 @@ function mysql_backup(){
 #   $2 - db_name, name of the database
 # TODO: implement
 function mysql_import(){
-	[ $1 ] && filename=$1 || read -p "Enter filename: " filename
-	[ $2 ] && db_name=$1 || read -p "Enter db_name: " db_name
+	[ $1 ] && db_name=$1 || read -p "Enter db_name: " db_name
+	[ $2 ] && filename=$2 || read -p "Enter filename: " filename
 
 	header "MYSQL IMPORT"
 
-	#mysql -u username -p database_name < textfilewithsqlstatments.sql
-
-	echo "NOT IMPLEMENTED, YET!"
+	# TOOD: check if file starts with /
+	#filename="`pwd`/$filename"
+	run_ask "import file ${yellow}$filename${white} into ${yellow}$db_name${default}" \
+			"`which mysql` -u $mysql_user --password=$mysql_pw $db_name < $filename"
 }
 
 
@@ -573,12 +584,14 @@ function init_colors(){
 # Displays output of $cmd (or not, depending on $verbose)
 #   $cmd must be set in advance!
 function output(){
+	echo $cmd
 	if [ $verbose ]
 	then
 		printf "\t$cmd\n"
 		command $cmd
 	else
-		out=`$cmd`
+		$cmd 2>&1
+		# out=`$cmd`
 	fi
 	if [ "$?" -ne "0" ]; then
 		printf "[ ${red}FAIL${default} ]\n\n"
