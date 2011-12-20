@@ -649,7 +649,7 @@ function run_sql(){
 	[ $3 ] && local mysql_pw=$3 || local mysql_pw=$mysql_pw
 
 	mysql=`which mysql`
-	cmd="$mysql --user=$mysql_user --password=$mysql_pw -e \"$sql\""
+	cmd="$mysql --user=$mysql_user --host $mysql_host --password=$mysql_pw -e \"$sql\""
 	run_ask "$message" "$cmd" $newline
 }
 
@@ -664,7 +664,7 @@ function run_mysqladmin(){
 
 	# build command-statement
 	mysqladmin=`which mysqladmin`
-	cmd="$mysqladmin -f -u $mysql_user --password=$mysql_pw $cmd"
+	cmd="$mysqladmin -f -u $mysql_user --host $mysql_host --password=$mysql_pw $cmd"
 	run_ask "$message" "$cmd" $newline
 }
 
