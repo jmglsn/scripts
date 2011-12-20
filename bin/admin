@@ -148,8 +148,8 @@ function vhost_add(){
 	# remove temp-folder
 	rm -rf $temp
 
-	header "[ ${green}DONE${default} ]"
-	printf "\tNext Steps:\n\tCreate a database for $app_name -> $0 mysql add $app_name\n\n"
+	printf "[ ${green}DONE${default} ]\n"
+	printf "Next Steps:\n\tCreate a database for ${white}$app_name${default} -> $0 mysql add $app_name\n\n"
 }
 
 # adds SSL to host (creates, if necessary)
@@ -188,7 +188,7 @@ function vhost_ssl(){
 	# remove temp-folder
 	rm -rf $temp
 
-	header "[ ${green}DONE${default} ]"
+	printf "[ ${green}DONE${default} ]\n"
 }
 
 # removes a vhost
@@ -221,9 +221,9 @@ function vhost_rm(){
 	# TODO: when in inactive-mode, ask :)
 	#run "Remove $vhosts_folder/$app_name" "sudo rm -rf $vhosts_folder/$app_name"
 
-	header "[ ${green}DONE${default} ]"
+	printf "[ ${green}DONE${default} ]\n"
 
-	printf "\tNext Steps:\n\tRemove database for $app_name -> $0 mysql rm $app_name\n"
+	printf "\tNext Steps:\n\tRemove database for ${white}$app_name${default} -> $0 mysql rm $app_name\n"
 	printf "\tRemove vhost-folder -> sudo rm -rf $vhosts_folder/$app_name\n\n"
 	exit 0
 }
@@ -304,7 +304,7 @@ function mysql_add(){
 
 	header "ADDING mysql db/user $db_name"
 
-	printf "\t${red}New password is: $new_password${default}\n"
+	printf "[ ${cyan}INFO${default} ]\tPassword is: ${white}$new_password${default}\n"
 	#	echo "create new mysql user: $dbUser with password: $dbUserPw      **SAVE THE PASSWORD FOR YOU!**"
 	#	run "Create mysql-database $db_name" "mysqladmin -f -u $mysql_user --password=$mysql_pw create $db_name"
 	run_sql "Create MYSQL user $db_name" \
@@ -530,7 +530,7 @@ function safe_name(){
 function header(){
 	header=$1
 	[ $2 ] && local color="$2" || local color="$white"
-	printf "\n$white -- $color$header$default ---------------$default\n\n"
+	printf "\n$white\t$color$header$default\n\n"
 }
 
 # prints out the current configuration
@@ -555,8 +555,7 @@ function print_config(){
 
 # prints out the dryrun header
 function print_dryrun(){
-	header "DRYRUN" $red
-	printf "\t${red}Attention: Dryrun means, nothing is actually executed$default\n\n"
+	printf "[ ${cyan}INFO${default} ]\t Dryrun - nothing will be executed\n"
 }
 
 # inits colors, regardless of color-capability
@@ -587,7 +586,7 @@ function output(){
 	echo $cmd
 	if [ $verbose ]
 	then
-		printf "\t$cmd\n"
+		printf "$cmd\n"
 		command $cmd
 	else
 		$cmd 2>&1
@@ -601,7 +600,7 @@ function output(){
 }
 
 # runs a command, depending on $interactive, it may ask
-#   $1 - message to be displayed (if -v)
+#   $1 - message to be displayed
 #   $2 - command to be executed
 #   $3 - boolean (optional) newline on message, if
 # TODO: if only $1 is set, do it, without asking
@@ -610,17 +609,18 @@ function run_ask(){
 	cmd="$2"
 	[ $3 ] && local newline="" || local newline="\n"
 
-	[ $dryrun ] && printf "\t${white}$message${default}\n\t$cmd\n[ ${yellow}SKIPPED${default} ]\n\n" && return
+	[ $dryrun ] && printf "${white}$message${default}\n$cmd\n[ ${yellow}SKIPPED${default} ]\n\n" && return
 
 	if [ $interactive ]
 	then
-		printf "\t${white}$message${default} "
-		read -s -n1 -p " [ y/N ] " answer
+		printf "${white}$message${default}\n"
+		printf "$cmd\n"
+		read -s -n1 -p "run? [ y/N ] " answer
 		printf "\n"
 		[[ $answer = [qQ] ]] && exit -1
 		[[ $answer = [yY] ]] && output || printf "[ ${yellow}SKIPPED${default} ]\n\n"
 	else
-		printf "\t${white}$message${default}\n"
+		printf "${white}$message${default}\n"
 		output
 	fi
 }
@@ -649,7 +649,11 @@ function run_sql(){
 	[ $3 ] && local mysql_pw=$3 || local mysql_pw=$mysql_pw
 
 	mysql=`which mysql`
-	cmd="$mysql --user=$mysql_user --host $mysql_host --password=$mysql_pw -e \"$sql\""
+	if [ -z $mysql ]; then
+		printf "[ ${red}ERROR${default} ]\t${white}mysql${default} not found, package installed?\n"
+		exit -1
+	fi
+	cmd="$mysql --user=$mysql_user --host=$mysql_host --password=$mysql_pw -e \"$sql\""
 	run_ask "$message" "$cmd" $newline
 }
 
@@ -664,6 +668,10 @@ function run_mysqladmin(){
 
 	# build command-statement
 	mysqladmin=`which mysqladmin`
+	if [ -z $mysqladmin ]; then
+		printf "[ ${red}ERROR${default} ]\t${white}mysqladmin${default} not found, package installed?\n"
+		exit -1
+	fi
 	cmd="$mysqladmin -f -u $mysql_user --host $mysql_host --password=$mysql_pw $cmd"
 	run_ask "$message" "$cmd" $newline
 }
